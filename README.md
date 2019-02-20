@@ -2,7 +2,7 @@
 Utility for running client integration tests. The recommended way of running tupelo-integration-runner is via the `quorumcontrol/tupelo-integration-runner` docker image.
 
 ### Configuration
-Ensure the client repo is set to accept a `TUPELO_HOST` environment variable in the form of `ip:port`. This information is injected automatically into the docker container for the client tests.
+Ensure the client repo is set to accept a `TUPELO_RPC_HOST` environment variable in the form of `ip:port`. This information is injected automatically into the docker container for the client tests.
 
 In the client repo, create a `.tupelo-integration.yml` file, as an example:
 ``` yaml

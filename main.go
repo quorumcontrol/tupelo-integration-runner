@@ -60,7 +60,7 @@ func runSingle(tester TesterConfig, tupeloContainer string) int {
 		return 1
 	}
 
-	cmd := exec.Command(dockerCmd, append([]string{"run", "--rm", "-e", fmt.Sprintf("TUPELO_HOST=%v:50051", tupeloIp), tester.Image}, tester.Command...)...)
+	cmd := exec.Command(dockerCmd, append([]string{"run", "--rm", "-e", fmt.Sprintf("TUPELO_RPC_HOST=%v:50051", tupeloIp), tester.Image}, tester.Command...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
