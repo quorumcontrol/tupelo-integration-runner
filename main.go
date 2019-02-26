@@ -10,7 +10,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
+	yaml "gopkg.in/yaml.v2"
 )
 
 var dockerCmd string
@@ -25,42 +25,42 @@ func runCmd(name string, arg ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func dockerRm(containerId string) error {
-	_, err := runCmd(dockerCmd, "rm", "-fv", containerId)
+func dockerRm(containerID string) error {
+	_, err := runCmd(dockerCmd, "rm", "-fv", containerID)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func dockerRun(args string) (string, error, func()) {
+func dockerRun(args string) (string, func(), error) {
 	cmdArgs := append([]string{"run", "-d"}, strings.Fields(args)...)
-	containerId, err := runCmd(dockerCmd, cmdArgs...)
+	containerID, err := runCmd(dockerCmd, cmdArgs...)
 
 	if err != nil {
-		return "", err, nil
+		return "", nil, err
 	}
 
-	return containerId, nil, func() {
-		dockerRm(containerId)
-	}
+	return containerID, func() {
+		dockerRm(containerID)
+	}, nil
 }
 
-func runSingle(tester TesterConfig, tupeloContainer string) int {
-	containerId, err, cancel := dockerRun(tupeloContainer)
+func runSingle(tester testerConfig, tupeloContainer string) int {
+	containerID, cancel, err := dockerRun(tupeloContainer)
 	if err != nil {
 		log.Error(err)
 		return 1
 	}
 	defer cancel()
 
-	tupeloIp, err := runCmd(dockerCmd, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerId)
+	tupeloIP, err := runCmd(dockerCmd, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerID)
 	if err != nil {
 		log.Error(err)
 		return 1
 	}
 
-	cmd := exec.Command(dockerCmd, append([]string{"run", "--rm", "-e", fmt.Sprintf("TUPELO_RPC_HOST=%v:50051", tupeloIp), tester.Image}, tester.Command...)...)
+	cmd := exec.Command(dockerCmd, append([]string{"run", "--rm", "-e", fmt.Sprintf("TUPELO_RPC_HOST=%v:50051", tupeloIP), tester.Image}, tester.Command...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
@@ -87,11 +87,11 @@ func setup() {
 	}
 }
 
-func run(config *Config) {
+func run(cfg *config) {
 	setup()
 
-	if config.Tester.Image == "" {
-		buildPath, err := filepath.Abs(config.Tester.Build)
+	if cfg.Tester.Image == "" {
+		buildPath, err := filepath.Abs(cfg.Tester.Build)
 		if err != nil {
 			log.Fatalf("error looking up build path %v", err)
 		}
@@ -100,14 +100,14 @@ func run(config *Config) {
 		if err != nil {
 			log.Fatalf("error building image %v", err)
 		}
-		config.Tester.Image = imageId
+		cfg.Tester.Image = imageId
 	}
 
 	var statusCodes []int
 
-	for _, tupeloContainer := range config.TupeloImages {
+	for _, tupeloContainer := range cfg.TupeloImages {
 		fmt.Printf("Running test suite with %v\n", tupeloContainer)
-		statusCodes = append(statusCodes, runSingle(config.Tester, tupeloContainer))
+		statusCodes = append(statusCodes, runSingle(cfg.Tester, tupeloContainer))
 	}
 
 	for _, code := range statusCodes {
@@ -119,19 +119,19 @@ func run(config *Config) {
 	os.Exit(0)
 }
 
-type TesterConfig struct {
+type testerConfig struct {
 	Build   string   `yaml:"build"`
 	Image   string   `yaml:"image"`
 	Command []string `yaml:"command"`
 }
 
-type Config struct {
+type config struct {
 	TupeloImages []string     `yaml:"tupeloImages"`
-	Tester       TesterConfig `yaml:"tester"`
+	Tester       testerConfig `yaml:"tester"`
 }
 
-func loadConfig(path string) *Config {
-	var c = &Config{}
+func loadConfig(path string) *config {
+	var c = &config{}
 	yamlFile, err := ioutil.ReadFile(path)
 	if err != nil {
 		log.Fatalf("Error getting config file at %v: %v", path, err)
@@ -147,8 +147,8 @@ func main() {
 	var logLevel string
 	var rootCmd = &cobra.Command{
 		Use:   "tupelo-integration",
-		Short: "A suite for running integration tests in docker",
-		Long:  "A suite for running integration tests in docker",
+		Short: "A utility for running integration tests in docker",
+		Long:  "A utility for running integration tests in docker",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			lvl, err := log.ParseLevel(logLevel)
 			if err != nil {
@@ -158,13 +158,13 @@ func main() {
 			log.SetFormatter(&log.TextFormatter{ForceColors: true})
 		},
 	}
-	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "L", "warn", "set log level for integration suite debugging")
+	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "L", "warn", "set log level for integration test suite debugging")
 
 	var configFile string
 	var runCmd = &cobra.Command{
 		Use:   "run",
-		Short: "Run the integration suite",
-		Long:  "Run the integration suite",
+		Short: "Run the integration test suite",
+		Long:  "Run the integration test suite",
 		Run: func(cmd *cobra.Command, args []string) {
 			configPath, err := filepath.Abs(configFile)
 			if err != nil {
@@ -175,7 +175,7 @@ func main() {
 			run(config)
 		},
 	}
-	runCmd.Flags().StringVarP(&configFile, "config-file", "c", ".tupelo-integration.yml", "Path to tupelo integration yaml configuration file")
+	runCmd.Flags().StringVarP(&configFile, "config-file", "c", ".tupelo-integration.yml", "Path to tupelo integration runner yaml configuration file")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.Execute()
