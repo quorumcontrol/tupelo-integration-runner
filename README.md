@@ -15,11 +15,10 @@ tester:
   command: ["npx", "mocha", "--exit"]
 ```
 
-`tupeloImages` - an array of full docker run commands for an tupelo rpc-server
-`tester.build` - where to execute docker build
-`tester.image` - use a docker image instead of building
-`tester.command` - what command to run in the docker container
-
+* `tupeloImages` - an array of full docker run commands for an tupelo rpc-server
+* `tester.build` - where to execute docker build
+* `tester.image` - use a docker image instead of building
+* `tester.command` - what command to run in the docker container
 
 ### Running
 Run the `tupelo-integration-runner` docker image with a docker.sock mount and a local app mount:
