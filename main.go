@@ -46,6 +46,14 @@ func dockerRun(args string) (string, func(), error) {
 	}, nil
 }
 
+func dockerPull(image string) error {
+	_, err := runCmd(dockerCmd, "pull", image)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func runSingle(tester testerConfig, tupeloContainer string) int {
 	containerID, cancel, err := dockerRun(tupeloContainer)
 	if err != nil {
@@ -87,6 +95,14 @@ func setup() {
 	}
 }
 
+func pullImage(image string) {
+	err := dockerPull(image)
+	if err != nil {
+		// not an error so this can work offline when desired
+		log.Warnf("Could not pull latest image: %v", err)
+	}
+}
+
 func run(cfg *config) {
 	setup()
 
@@ -107,6 +123,8 @@ func run(cfg *config) {
 
 	for _, tupeloContainer := range cfg.TupeloImages {
 		fmt.Printf("Running test suite with %v\n", tupeloContainer)
+		tupeloImage := strings.Split(tupeloContainer, " ")[0]
+		pullImage(tupeloImage)
 		statusCodes = append(statusCodes, runSingle(cfg.Tester, tupeloContainer))
 	}
 
