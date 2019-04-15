@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -54,7 +55,38 @@ func dockerPull(image string) error {
 	return nil
 }
 
+func getVersion(tupeloImage string) (string, error) {
+	cmdArgs := []string{"run", tupeloImage, "version"}
+	version, err := runCmd(dockerCmd, cmdArgs...)
+
+	if err == nil {
+		versionRegex := regexp.MustCompile(`v(\d+\.\d+\.\d+)`)
+		matchedVersion := versionRegex.FindStringSubmatch(version)
+
+		if len(matchedVersion) > 1 {
+			return matchedVersion[1], nil
+		}
+	}
+
+	tupeloTag := strings.Split(tupeloImage, ":")
+
+	if len(tupeloTag) > 1 {
+		return tupeloTag[len(tupeloTag)-1], nil
+	}
+
+	return "snapshot", nil
+}
+
 func runSingle(tester testerConfig, tupeloContainer string) int {
+	tupeloImage := strings.Split(tupeloContainer, " ")[0]
+	pullImage(tupeloImage)
+
+	version, err := getVersion(tupeloImage)
+	if err != nil {
+		log.Error(err)
+		return 1
+	}
+
 	containerID, cancel, err := dockerRun(tupeloContainer)
 	if err != nil {
 		log.Error(err)
@@ -68,7 +100,12 @@ func runSingle(tester testerConfig, tupeloContainer string) int {
 		return 1
 	}
 
-	cmd := exec.Command(dockerCmd, append([]string{"run", "--rm", "-e", fmt.Sprintf("TUPELO_RPC_HOST=%v:50051", tupeloIP), tester.Image}, tester.Command...)...)
+	cmd := exec.Command(dockerCmd, append([]string{
+		"run", "--rm",
+		"-e", fmt.Sprintf("TUPELO_RPC_HOST=%v:50051", tupeloIP),
+		"-e", fmt.Sprintf("TUPELO_VERSION=%v", version),
+		tester.Image,
+	}, tester.Command...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
@@ -123,8 +160,6 @@ func run(cfg *config) {
 
 	for _, tupeloContainer := range cfg.TupeloImages {
 		fmt.Printf("Running test suite with %v\n", tupeloContainer)
-		tupeloImage := strings.Split(tupeloContainer, " ")[0]
-		pullImage(tupeloImage)
 		statusCodes = append(statusCodes, runSingle(cfg.Tester, tupeloContainer))
 	}
 
