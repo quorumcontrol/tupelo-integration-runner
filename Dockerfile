@@ -1,6 +1,6 @@
 FROM golang:1.12.4 AS build
 
-WORKDIR /tupelo-integration-runner
+WORKDIR /app
 
 COPY go.* ./
 
@@ -22,7 +22,7 @@ RUN apt-get update && \
     rm docker-${DOCKERVERSION}.tgz && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /tupelo-integration-runner/tupelo-integration-runner /usr/bin/tupelo-integration-runner
+COPY --from=build /app/tupelo-integration-runner /usr/bin/tupelo-integration-runner
 
 WORKDIR /src
 
