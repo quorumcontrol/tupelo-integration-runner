@@ -1,14 +1,14 @@
-FROM golang:1.11.5 AS build
+FROM golang:1.12.4 AS build
 
-RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+WORKDIR /app
 
-WORKDIR /go/src/github.com/quorumcontrol/tupelo-integration-runner
+COPY go.* ./
 
-COPY . .
+RUN go mod download
 
-RUN dep ensure
+COPY . ./
 
-RUN go install -v -a -ldflags '-extldflags "-static"' -gcflags=-trimpath=$GOPATH -asmflags=-trimpath=$GOPATH
+RUN go build
 
 FROM debian:stretch-slim
 LABEL maintainer="dev@quroumcontrol.com"
@@ -22,7 +22,7 @@ RUN apt-get update && \
     rm docker-${DOCKERVERSION}.tgz && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /go/bin/tupelo-integration-runner /usr/bin/tupelo-integration-runner
+COPY --from=build /app/tupelo-integration-runner /usr/bin/tupelo-integration-runner
 
 WORKDIR /src
 
