@@ -17,6 +17,7 @@ import (
 var dockerCmd string
 
 func runCmd(name string, arg ...string) (string, error) {
+	log.Tracef("Running command %v", strings.Join(append([]string{name}, arg...), " "))
 	cmd := exec.Command(name, arg...)
 	out, err := cmd.CombinedOutput()
 	log.Trace(string(out))
@@ -77,17 +78,22 @@ func getVersion(tupeloImage string) (string, error) {
 	return "snapshot", nil
 }
 
-func runSingle(tester testerConfig, tupeloContainer string) int {
-	tupeloImage := strings.Split(tupeloContainer, " ")[0]
-	pullImage(tupeloImage)
+func runSingle(tester containerConfig, tupelo containerConfig) int {
+	if tupelo.Build == "" {
+		pullImage(tupelo.Image)
+	}
 
-	version, err := getVersion(tupeloImage)
+	if tester.Build == "" {
+		pullImage(tester.Image)
+	}
+
+	version, err := getVersion(tupelo.Image)
 	if err != nil {
 		log.Error(err)
 		return 1
 	}
 
-	containerID, cancel, err := dockerRun(tupeloContainer)
+	containerID, cancel, err := dockerRun(strings.Join(append([]string{tupelo.Image}, tupelo.Command...), " "))
 	if err != nil {
 		log.Error(err)
 		return 1
@@ -140,27 +146,41 @@ func pullImage(image string) {
 	}
 }
 
+func buildImage(buildRoot string) string {
+	fmt.Printf("Building Docker image from %s\n", buildRoot)
+
+	buildPath, err := filepath.Abs(buildRoot)
+	if err != nil {
+		log.Fatalf("error looking up build path %v", err)
+	}
+
+	imageId, err := runCmd(dockerCmd, "build", "-q", buildPath)
+	if err != nil {
+		log.Fatalf("error building image %v", err)
+	}
+	return imageId
+}
+
 func run(cfg *config) {
 	setup()
 
-	if cfg.Tester.Image == "" {
-		buildPath, err := filepath.Abs(cfg.Tester.Build)
-		if err != nil {
-			log.Fatalf("error looking up build path %v", err)
-		}
-
-		imageId, err := runCmd(dockerCmd, "build", "-q", buildPath)
-		if err != nil {
-			log.Fatalf("error building image %v", err)
-		}
-		cfg.Tester.Image = imageId
-	}
-
 	var statusCodes []int
 
-	for _, tupeloContainer := range cfg.TupeloImages {
-		fmt.Printf("Running test suite with %v\n", tupeloContainer)
-		statusCodes = append(statusCodes, runSingle(cfg.Tester, tupeloContainer))
+	for _, tupelo := range cfg.TupeloConfigs {
+		if tupelo.Image == "" {
+			imageId := buildImage(tupelo.Build)
+			tupelo.Image = imageId
+		}
+
+		for _, tester := range cfg.TesterConfigs {
+			if tester.Image == "" {
+				imageId := buildImage(tester.Build)
+				tester.Image = imageId
+			}
+
+			fmt.Printf("Running %s test suite with %s tupelo\n", tester, tupelo)
+			statusCodes = append(statusCodes, runSingle(tester, tupelo))
+		}
 	}
 
 	for _, code := range statusCodes {
@@ -172,27 +192,101 @@ func run(cfg *config) {
 	os.Exit(0)
 }
 
-type testerConfig struct {
+type containerConfig struct {
+	Name    string   `yaml:"name"`
 	Build   string   `yaml:"build"`
 	Image   string   `yaml:"image"`
 	Command []string `yaml:"command"`
 }
 
+func (c containerConfig) String() string {
+	if c.Name != "" {
+		return c.Name
+	}
+
+	if c.Image != "" {
+		return c.Image
+	}
+
+	return c.Build
+}
+
+type yamlConfigV2 struct {
+	TupeloConfigs map[string]containerConfig `yaml:"tupelos"`
+	TesterConfigs map[string]containerConfig `yaml:"testers"`
+}
+
+type yamlConfigV1 struct {
+	TupeloImages []string        `yaml:"tupeloImages"`
+	Tester       containerConfig `yaml:"tester"`
+}
+
 type config struct {
-	TupeloImages []string     `yaml:"tupeloImages"`
-	Tester       testerConfig `yaml:"tester"`
+	TupeloConfigs []containerConfig
+	TesterConfigs []containerConfig
 }
 
 func loadConfig(path string) *config {
 	var c = &config{}
+
+	var yamlCfg = &yamlConfigV2{}
+
 	yamlFile, err := ioutil.ReadFile(path)
 	if err != nil {
 		log.Fatalf("Error getting config file at %v: %v", path, err)
 	}
-	err = yaml.Unmarshal(yamlFile, c)
+	err = yaml.Unmarshal(yamlFile, yamlCfg)
 	if err != nil {
 		log.Fatalf("Error parsing yaml config file at %v: %v", path, err)
 	}
+
+	if len(yamlCfg.TupeloConfigs) > 0 {
+		for n, cfg := range yamlCfg.TesterConfigs {
+			c.TesterConfigs = append(c.TesterConfigs, containerConfig{
+				Name:    n,
+				Build:   cfg.Build,
+				Image:   cfg.Image,
+				Command: cfg.Command,
+			})
+		}
+
+		for n, cfg := range yamlCfg.TupeloConfigs {
+			var command []string
+
+			if len(cfg.Command) == 0 {
+				command = []string{"rpc-server", "-l", "3"}
+			} else {
+				command = cfg.Command
+			}
+
+			c.TupeloConfigs = append(c.TupeloConfigs, containerConfig{
+				Name:    n,
+				Build:   cfg.Build,
+				Image:   cfg.Image,
+				Command: command,
+			})
+		}
+
+		return c
+	}
+
+	var cv1 = &yamlConfigV1{}
+	errV1 := yaml.Unmarshal(yamlFile, cv1)
+	if errV1 != nil {
+		log.Fatalf("Error parsing yaml config file at %v: %v", path, errV1)
+	}
+
+	for _, image := range cv1.TupeloImages {
+		imageAndCommand := strings.Split(image, " ")
+		c.TupeloConfigs = append(c.TupeloConfigs,
+			containerConfig{
+				Image:   imageAndCommand[0],
+				Command: imageAndCommand[1:],
+			})
+	}
+
+	c.TesterConfigs = []containerConfig{cv1.Tester}
+
 	return c
 }
 
