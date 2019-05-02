@@ -236,7 +236,11 @@ func loadConfig(path string) *config {
 		log.Fatalf("Error getting config file at %v: %v", path, err)
 	}
 	err = yaml.Unmarshal(yamlFile, yamlCfg)
-	if err == nil {
+	if err != nil {
+		log.Fatalf("Error parsing yaml config file at %v: %v", path, err)
+	}
+
+	if len(yamlCfg.TupeloConfigs) > 0 {
 		for n, cfg := range yamlCfg.TesterConfigs {
 			c.TesterConfigs = append(c.TesterConfigs, containerConfig{
 				Name:    n,
@@ -269,11 +273,16 @@ func loadConfig(path string) *config {
 	var cv1 = &yamlConfigV1{}
 	errV1 := yaml.Unmarshal(yamlFile, cv1)
 	if errV1 != nil {
-		log.Fatalf("Error parsing yaml config file at %v: %v", path, err)
+		log.Fatalf("Error parsing yaml config file at %v: %v", path, errV1)
 	}
 
 	for _, image := range cv1.TupeloImages {
-		c.TupeloConfigs = append(c.TupeloConfigs, containerConfig{Image: image})
+		imageAndCommand := strings.Split(image, " ")
+		c.TupeloConfigs = append(c.TupeloConfigs,
+			containerConfig{
+				Image:   imageAndCommand[0],
+				Command: imageAndCommand[1:],
+			})
 	}
 
 	c.TesterConfigs = []containerConfig{cv1.Tester}
@@ -308,7 +317,7 @@ func main() {
 			if err != nil {
 				panic("Error fetching current directory")
 			}
-
+			
 			config := loadConfig(configPath)
 			run(config)
 		},
