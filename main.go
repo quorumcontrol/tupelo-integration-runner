@@ -317,7 +317,7 @@ func main() {
 			if err != nil {
 				panic("Error fetching current directory")
 			}
-			
+
 			config := loadConfig(configPath)
 			run(config)
 		},
