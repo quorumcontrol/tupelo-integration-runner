@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -15,6 +17,7 @@ import (
 )
 
 var dockerCmd string
+var dockerComposeCmd string
 
 func runCmd(name string, arg ...string) (string, error) {
 	log.Tracef("Running command %v", strings.Join(append([]string{name}, arg...), " "))
@@ -35,10 +38,33 @@ func dockerRm(containerID string) error {
 	return nil
 }
 
-func dockerRun(args string) (string, func(), error) {
-	cmdArgs := append([]string{"run", "-d"}, strings.Fields(args)...)
-	containerID, err := runCmd(dockerCmd, cmdArgs...)
+func dockerRunArgs(cfg *containerConfig, daemon bool) []string {
+	cmdArgs := []string{"run"}
 
+	if daemon {
+		cmdArgs = append(cmdArgs, "-d")
+	} else {
+		cmdArgs = append(cmdArgs, "--rm")
+	}
+
+	for k, v := range cfg.Env {
+		cmdArgs = append(cmdArgs, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	if cfg.Network != "" {
+		cmdArgs = append(cmdArgs, "--net", cfg.Network)
+	}
+
+	cmdArgs = append(cmdArgs, cfg.Image)
+	cmdArgs = append(cmdArgs, cfg.Command...)
+
+	return cmdArgs
+}
+
+func dockerRunDaemon(cfg *containerConfig) (string, func(), error) {
+	cmdArgs := dockerRunArgs(cfg, true)
+
+	containerID, err := runCmd(dockerCmd, cmdArgs...)
 	if err != nil {
 		return "", nil, err
 	}
@@ -46,6 +72,18 @@ func dockerRun(args string) (string, func(), error) {
 	return containerID, func() {
 		dockerRm(containerID)
 	}, nil
+}
+
+func dockerRunForeground(cfg *containerConfig) error {
+	cmdArgs := dockerRunArgs(cfg, false)
+
+	fmt.Println("Running docker", cmdArgs)
+
+	cmd := exec.Command(dockerCmd, cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
 }
 
 func dockerPull(image string) error {
@@ -78,13 +116,117 @@ func getVersion(tupeloImage string) (string, error) {
 	return "snapshot", nil
 }
 
-func runSingle(tester containerConfig, tupelo containerConfig) int {
-	if tupelo.Build == "" {
-		pullImage(tupelo.Image)
+func containerIP(nameOrID string) (string, error) {
+	maxAttempts := 100
+
+	var (
+		cIP string
+		err error
+	)
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		cIP, err = runCmd(dockerCmd, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", nameOrID)
+		if err == nil && cIP != "" {
+			return cIP, nil
+		}
+		time.Sleep(5 * time.Second)
 	}
 
-	if tester.Build == "" {
-		pullImage(tester.Image)
+	return "", err
+}
+
+var runningTupelo = make(map[string]string)
+
+func runSingle(tester *containerConfig, tupelo *containerConfig) int {
+    var (
+    	bootstrapperIP string
+    	rpcServerIP string
+    	err error
+	)
+
+    if len(runningTupelo) == 0 {
+		if tupelo.DockerCompose {
+			fmt.Println("Starting tupelo docker-compose stack")
+			out, err := runCmd(dockerComposeCmd, "up", "-d", "--build", "--force-recreate")
+			if err != nil {
+				log.Errorf("Error running 'docker-compose up': %v - %v", err, out)
+				return 1
+			}
+			tupelo.StopFunc = func() {
+				fmt.Println("Stopping tupelo docker-compose stack")
+				runCmd(dockerComposeCmd, "down")
+			}
+
+			bootstrapperIP, err = containerIP("bootstrap")
+			if err != nil {
+				log.Error(err)
+				return 1
+			}
+
+			rpcServerIP, err = containerIP("rpc-server")
+			if err != nil {
+				log.Error(err)
+				return 1
+			}
+
+			runningTupelo["network"] = "tupelo_default"
+
+			fmt.Println("Waiting for bootstrapper and RPC servers to come up")
+			bootsrapperPortOpen := false
+			rpcServerPortOpen := false
+			for {
+				fmt.Print(".")
+				conn, _ := net.DialTimeout("tcp", net.JoinHostPort("localhost", "34001"), 1 * time.Second)
+				if conn != nil {
+					bootsrapperPortOpen = true
+					err = conn.Close()
+					if err != nil {
+						log.Errorf("Error closing test bootstrapper connection: %v", err)
+					}
+				}
+				conn, _ = net.DialTimeout("tcp", net.JoinHostPort("localhost", "50051"), 1 * time.Second)
+				if conn != nil {
+					rpcServerPortOpen = true
+					err = conn.Close()
+					if err != nil {
+						log.Errorf("Error closing test RPC server connection: %v", err)
+					}
+				}
+				if bootsrapperPortOpen && rpcServerPortOpen {
+					fmt.Println()
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+		} else {
+			if tupelo.Build == "" {
+				pullImage(tupelo.Image)
+			}
+
+			if tester.Build == "" {
+				pullImage(tester.Image)
+			}
+
+			fmt.Println("Starting tupelo container")
+			containerID, cancel, err := dockerRunDaemon(tupelo)
+			if err != nil {
+				log.Error(err)
+				return 1
+			}
+			tupelo.StopFunc = func() {
+				fmt.Println("Stopping tupelo container")
+				cancel()
+			}
+
+			rpcServerIP, err = containerIP(containerID)
+			if err != nil {
+				log.Error(err)
+				return 1
+			}
+		}
+
+		runningTupelo["rpcServerIP"] = rpcServerIP
+		runningTupelo["bootstrapperIP"] = bootstrapperIP
 	}
 
 	version, err := getVersion(tupelo.Image)
@@ -93,30 +235,22 @@ func runSingle(tester containerConfig, tupelo containerConfig) int {
 		return 1
 	}
 
-	containerID, cancel, err := dockerRun(strings.Join(append([]string{tupelo.Image}, tupelo.Command...), " "))
-	if err != nil {
-		log.Error(err)
-		return 1
+	if tester.Env == nil {
+		tester.Env = make(map[string]string)
 	}
-	defer cancel()
-
-	tupeloIP, err := runCmd(dockerCmd, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerID)
-	if err != nil {
-		log.Error(err)
-		return 1
+	tester.Env["TUPELO_RPC_HOST"] = fmt.Sprintf("%s:50051", runningTupelo["rpcServerIP"])
+	if runningTupelo["bootstrapperIP"] != "" {
+		tester.Env["TUPELO_BOOTSTRAP_NODES"] = fmt.Sprintf("/ip4/%s/tcp/34001/ipfs/16Uiu2HAm3TGSEKEjagcCojSJeaT5rypaeJMKejijvYSnAjviWwV5", runningTupelo["bootstrapperIP"])
+	}
+	tester.Env["TUPELO_VERSION"] = version
+	if runningTupelo["network"] != "" {
+		tester.Network = runningTupelo["network"]
 	}
 
-	cmd := exec.Command(dockerCmd, append([]string{
-		"run", "--rm",
-		"-e", fmt.Sprintf("TUPELO_RPC_HOST=%v:50051", tupeloIP),
-		"-e", fmt.Sprintf("TUPELO_VERSION=%v", version),
-		tester.Image,
-	}, tester.Command...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	err = dockerRunForeground(tester)
+
 	if err != nil {
-		log.Errorf("%v errored: %v", strings.Join(cmd.Args, " "), err)
+		log.Errorf("%+v errored: %v", tester, err)
 		return 1
 	}
 	return 0
@@ -127,6 +261,12 @@ func setup() {
 	dockerCmd, err = exec.LookPath("docker")
 	if err != nil {
 		log.Errorf("Could not find docker command: %v", err)
+		os.Exit(1)
+	}
+
+	dockerComposeCmd, err = exec.LookPath("docker-compose")
+	if err != nil {
+		log.Errorf("Could not find docker-compose command: %v", err)
 		os.Exit(1)
 	}
 
@@ -167,20 +307,33 @@ func run(cfg *config) {
 	var statusCodes []int
 
 	for _, tupelo := range cfg.TupeloConfigs {
-		if tupelo.Image == "" {
+		if tupelo.DockerCompose {
+			if tupelo.Image != "" {
+				log.Fatalf("Error in %s: DockerCompose and Image are mutually exclusive", tupelo)
+			}
+		} else if tupelo.Image == "" {
+			if tupelo.Build == "" {
+				tupelo.Build = "."
+			}
 			imageId := buildImage(tupelo.Build)
 			tupelo.Image = imageId
 		}
 
 		for _, tester := range cfg.TesterConfigs {
 			if tester.Image == "" {
+				if tester.Build == "" {
+					tester.Build = "."
+				}
 				imageId := buildImage(tester.Build)
 				tester.Image = imageId
 			}
 
 			fmt.Printf("Running %s test suite with %s tupelo\n", tester, tupelo)
-			statusCodes = append(statusCodes, runSingle(tester, tupelo))
+			statusCodes = append(statusCodes, runSingle(&tester, &tupelo))
 		}
+
+		tupelo.StopFunc()
+		runningTupelo = make(map[string]string)
 	}
 
 	for _, code := range statusCodes {
@@ -193,10 +346,14 @@ func run(cfg *config) {
 }
 
 type containerConfig struct {
-	Name    string   `yaml:"name"`
-	Build   string   `yaml:"build"`
-	Image   string   `yaml:"image"`
-	Command []string `yaml:"command"`
+	Name          string            `yaml:"name"`
+	Build         string            `yaml:"build"`
+	Image         string            `yaml:"image"`
+	Command       []string          `yaml:"command"`
+	Env           map[string]string `yaml:"env"`
+	DockerCompose bool              `yaml:"docker-compose"`
+	Network       string            `yaml:"network"`
+	StopFunc      func()
 }
 
 func (c containerConfig) String() string {
@@ -251,19 +408,16 @@ func loadConfig(path string) *config {
 		}
 
 		for n, cfg := range yamlCfg.TupeloConfigs {
-			var command []string
-
 			if len(cfg.Command) == 0 {
-				command = []string{"rpc-server", "-l", "3"}
-			} else {
-				command = cfg.Command
+				cfg.DockerCompose = true
 			}
 
 			c.TupeloConfigs = append(c.TupeloConfigs, containerConfig{
-				Name:    n,
-				Build:   cfg.Build,
-				Image:   cfg.Image,
-				Command: command,
+				Name:          n,
+				Build:         cfg.Build,
+				Image:         cfg.Image,
+				Command:       cfg.Command,
+				DockerCompose: cfg.DockerCompose,
 			})
 		}
 
