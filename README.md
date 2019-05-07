@@ -6,22 +6,30 @@ Ensure the client repo is set to accept a `TUPELO_RPC_HOST` environment variable
 
 In the client repo, create a `.tupelo-integration.yml` file, as an example:
 ``` yaml
-tupeloImages:
-  - quorumcontrol/tupelo:latest tupelo rpc-server -l 3
-  - quorumcontrol/tupelo:master tupelo rpc-server -l 3
+tupelos:
+  tupelo-latest:
+    image: quorumcontrol/tupelo:latest
+  tupelo-master:
+    image: quorumcontrol/tupelo:master
 
-tester:
-  build: .
-  command: ["npx", "mocha", "--exit"]
+testers:
+  js-sdk:
+    build: .
+    command: ["npx", "mocha", "--exit"]
 ```
 
-* `tupeloImages` - an array of full docker run commands for an tupelo rpc-server
-* `tester.build` - where to execute docker build
-* `tester.image` - use a docker image instead of building
-* `tester.command` - what command to run in the docker container
+* `tupelos` - a map of containers for tupelo rpc-servers w/ name keys
+* `testers` - a map of containers for tester instances w/ name keys
+
+Each container is a map consisting of:
+
+* `build` - where to execute docker build
+* `image` - use a docker image instead of building
+* `command` - what command to run in the docker container (defaults to `rpc-server -l 3` for tupelo containers)
 
 ### Running
 Run the `tupelo-integration-runner` docker image with a docker.sock mount and a local app mount:
 `docker run -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/src quorumcontrol/tupelo-integration-runner`
 
-For each item in the `tupeloImages` array, this script will automatically spin up the rpc-server then build and run the specified container from the `tester` object.
+For each combination of a container in the `tupelos` map and a container in the `testers` map, this script will
+automatically spin up the rpc-server then build and run the specified container from the `tester` object.
