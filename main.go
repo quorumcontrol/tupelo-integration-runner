@@ -135,6 +135,41 @@ func containerIP(nameOrID string) (string, error) {
 	return "", err
 }
 
+func waitForBootstrapAndRPCServers() error {
+	fmt.Println("Waiting for bootstrapper and RPC servers to come up")
+	bootsrapperPortOpen := false
+	rpcServerPortOpen := false
+
+	var err error
+
+	for {
+		fmt.Print(".")
+		conn, _ := net.DialTimeout("tcp", net.JoinHostPort("localhost", "34001"), 1 * time.Second)
+		if conn != nil {
+			bootsrapperPortOpen = true
+			err = conn.Close()
+			if err != nil {
+				return fmt.Errorf("Error closing test bootstrapper connection: %v", err)
+			}
+		}
+		conn, _ = net.DialTimeout("tcp", net.JoinHostPort("localhost", "50051"), 1 * time.Second)
+		if conn != nil {
+			rpcServerPortOpen = true
+			err = conn.Close()
+			if err != nil {
+				return fmt.Errorf("Error closing test RPC server connection: %v", err)
+			}
+		}
+		if bootsrapperPortOpen && rpcServerPortOpen {
+			fmt.Println()
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil
+}
+
 var runningTupelo = make(map[string]string)
 
 func runSingle(tester *containerConfig, tupelo *containerConfig) int {
@@ -171,32 +206,10 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 
 			runningTupelo["network"] = "tupelo_default"
 
-			fmt.Println("Waiting for bootstrapper and RPC servers to come up")
-			bootsrapperPortOpen := false
-			rpcServerPortOpen := false
-			for {
-				fmt.Print(".")
-				conn, _ := net.DialTimeout("tcp", net.JoinHostPort("localhost", "34001"), 1 * time.Second)
-				if conn != nil {
-					bootsrapperPortOpen = true
-					err = conn.Close()
-					if err != nil {
-						log.Errorf("Error closing test bootstrapper connection: %v", err)
-					}
-				}
-				conn, _ = net.DialTimeout("tcp", net.JoinHostPort("localhost", "50051"), 1 * time.Second)
-				if conn != nil {
-					rpcServerPortOpen = true
-					err = conn.Close()
-					if err != nil {
-						log.Errorf("Error closing test RPC server connection: %v", err)
-					}
-				}
-				if bootsrapperPortOpen && rpcServerPortOpen {
-					fmt.Println()
-					break
-				}
-				time.Sleep(500 * time.Millisecond)
+			err = waitForBootstrapAndRPCServers()
+			if err != nil {
+				log.Error(err)
+				return 1
 			}
 		} else {
 			if tupelo.Build == "" {
