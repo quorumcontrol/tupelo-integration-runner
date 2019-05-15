@@ -1,4 +1,4 @@
-FROM golang:1.12.4 AS build
+FROM golang:1.12.5 AS build
 
 WORKDIR /app
 
@@ -13,18 +13,12 @@ RUN go build
 FROM debian:stretch-slim
 LABEL maintainer="dev@quroumcontrol.com"
 
-ENV DOCKERVERSION=18.06.2-ce
+COPY --from=library/docker:latest /usr/local/bin/docker /usr/local/bin/docker
 
-RUN apt-get update && \
-    apt-get install -y ca-certificates curl && \
-    curl -fsSLO https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKERVERSION}.tgz && \
-    tar xzvf docker-${DOCKERVERSION}.tgz --strip 1 -C /usr/local/bin docker/docker && \
-    rm docker-${DOCKERVERSION}.tgz && \
-    rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/tupelo-integration-runner /usr/local/bin/tupelo-integration-runner
 
-COPY --from=build /app/tupelo-integration-runner /usr/bin/tupelo-integration-runner
+RUN mkdir -p /src/tupelo
+WORKDIR /src/tupelo
 
-WORKDIR /src
-
-ENTRYPOINT ["/usr/bin/tupelo-integration-runner"]
+ENTRYPOINT ["/usr/local/bin/tupelo-integration-runner"]
 CMD ["run"]
