@@ -30,6 +30,14 @@ func runCmd(name string, arg ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func runForegroundCmd(name string, arg ...string) error {
+	log.Tracef("Running command %v", strings.Join(append([]string{name}, arg...), " "))
+	cmd := exec.Command(name, arg...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func dockerRm(containerID string) error {
 	_, err := runCmd(dockerCmd, "rm", "-fv", containerID)
 	if err != nil {
@@ -79,11 +87,7 @@ func dockerRunForeground(cfg *containerConfig) error {
 
 	fmt.Println("Running docker", cmdArgs)
 
-	cmd := exec.Command(dockerCmd, cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	return runForegroundCmd(dockerCmd, cmdArgs...)
 }
 
 func dockerPull(image string) error {
@@ -182,14 +186,18 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
     if len(runningTupelo) == 0 {
 		if tupelo.DockerCompose {
 			fmt.Println("Starting tupelo docker-compose stack")
-			out, err := runCmd(dockerComposeCmd, "up", "-d", "--build", "--force-recreate")
+			err := runForegroundCmd(dockerComposeCmd, "up", "-d", "--build", "--force-recreate")
 			if err != nil {
-				log.Errorf("Error running 'docker-compose up': %v - %v", err, out)
+				log.Errorf("error running 'docker-compose up': %v", err)
 				return 1
 			}
 			tupelo.StopFunc = func() {
 				fmt.Println("Stopping tupelo docker-compose stack")
-				runCmd(dockerComposeCmd, "down")
+				_, err := runCmd(dockerComposeCmd, "down")
+				if err != nil {
+					log.Errorf("error stopping docker-compose stack: %v", err)
+					return
+				}
 			}
 
 			bootstrapperIP, err = containerIP("bootstrap")

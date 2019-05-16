@@ -27,6 +27,11 @@ Each container is a map consisting of:
 * `image` - use a docker image instead of building
 * `command` - what command to run in the docker container (defaults to `rpc-server -l 3` for tupelo containers)
 
+OR
+
+* `docker-compose: true` - when used by itself in a tupelo config it runs `docker-compose up` in the current
+directory to run a tupelo (currently only works in tupelo, not in SDKs).
+
 ### Running
 Run the `tupelo-integration-runner` docker image with a docker.sock mount and a local app mount:
 `docker run -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/src quorumcontrol/tupelo-integration-runner`
