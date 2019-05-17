@@ -429,10 +429,6 @@ func loadConfig(path string) *config {
 		}
 
 		for n, cfg := range yamlCfg.TupeloConfigs {
-			if len(cfg.Command) == 0 {
-				cfg.DockerCompose = true
-			}
-
 			c.TupeloConfigs = append(c.TupeloConfigs, containerConfig{
 				Name:          n,
 				Build:         cfg.Build,
