@@ -287,8 +287,8 @@ func setup() {
 
 	dockerComposeCmd, err = exec.LookPath("docker-compose")
 	if err != nil {
-		log.Errorf("Could not find docker-compose command: %v", err)
-		os.Exit(1)
+		log.Warnf("Could not find docker-compose command: %v", err)
+		log.Warn("docker-compose builds will not work")
 	}
 
 	cmd := exec.Command(dockerCmd, "info")
