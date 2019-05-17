@@ -140,13 +140,15 @@ func containerIP(nameOrID string) (string, error) {
 }
 
 func waitForBootstrapAndRPCServers() error {
+	const maxAttempts = 500
+
 	fmt.Println("Waiting for bootstrapper and RPC servers to come up")
 	bootsrapperPortOpen := false
 	rpcServerPortOpen := false
 
 	var err error
 
-	for {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		fmt.Print(".")
 		conn, _ := net.DialTimeout("tcp", net.JoinHostPort("localhost", "34001"), 1 * time.Second)
 		if conn != nil {
