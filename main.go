@@ -139,7 +139,7 @@ func containerIP(nameOrID string) (string, error) {
 	return "", err
 }
 
-func waitForBootstrapAndRPCServers() error {
+func waitForBootstrapAndRPCServers(config map[string]string) error {
 	const maxAttempts = 500
 
 	fmt.Println("Waiting for bootstrapper and RPC servers to come up")
@@ -150,7 +150,7 @@ func waitForBootstrapAndRPCServers() error {
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		fmt.Print(".")
-		conn, _ := net.DialTimeout("tcp", net.JoinHostPort("localhost", "34001"), 1 * time.Second)
+		conn, _ := net.DialTimeout("tcp", net.JoinHostPort(config["bootstrapper"], "34001"), 1 * time.Second)
 		if conn != nil {
 			bootsrapperPortOpen = true
 			err = conn.Close()
@@ -158,7 +158,7 @@ func waitForBootstrapAndRPCServers() error {
 				return fmt.Errorf("Error closing test bootstrapper connection: %v", err)
 			}
 		}
-		conn, _ = net.DialTimeout("tcp", net.JoinHostPort("localhost", "50051"), 1 * time.Second)
+		conn, _ = net.DialTimeout("tcp", net.JoinHostPort(config["rpcServer"], "50051"), 1 * time.Second)
 		if conn != nil {
 			rpcServerPortOpen = true
 			err = conn.Close()
@@ -216,7 +216,11 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 
 			runningTupelo["network"] = "tupelo_default"
 
-			err = waitForBootstrapAndRPCServers()
+			err = waitForBootstrapAndRPCServers(
+				map[string]string{
+					"bootstrapper": bootstrapperIP,
+					"rpcServer":    rpcServerIP,
+				})
 			if err != nil {
 				log.Error(err)
 				return 1
