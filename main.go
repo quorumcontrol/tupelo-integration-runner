@@ -91,6 +91,7 @@ func dockerRunForeground(cfg *containerConfig) error {
 }
 
 func dockerPull(image string) error {
+	fmt.Println("Pulling image", image)
 	_, err := runCmd(dockerCmd, "pull", image)
 	if err != nil {
 		return err
