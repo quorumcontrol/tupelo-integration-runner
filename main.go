@@ -231,10 +231,6 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 				pullImage(tupelo.Image)
 			}
 
-			if tester.Build == "" {
-				pullImage(tester.Image)
-			}
-
 			fmt.Println("Starting tupelo container")
 			containerID, cancel, err := dockerRunDaemon(tupelo)
 			if err != nil {
@@ -273,6 +269,10 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 	tester.Env["TUPELO_VERSION"] = version
 	if runningTupelo["network"] != "" {
 		tester.Network = runningTupelo["network"]
+	}
+
+	if tester.Build == "" {
+		pullImage(tester.Image)
 	}
 
 	err = dockerRunForeground(tester)
