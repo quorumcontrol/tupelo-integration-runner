@@ -140,53 +140,116 @@ func containerIP(nameOrID string) (string, error) {
 	return "", err
 }
 
-func waitForBootstrapAndRPCServers(config map[string]string) error {
-	const maxAttempts = 500
+type discoverHost struct {
+	Addresses []string
+	Port      string
+}
 
-	fmt.Println("Waiting for bootstrapper and RPC servers to come up")
-	bootsrapperPortOpen := false
-	rpcServerPortOpen := false
+type hostConfig struct {
+	Host string
+	Port string
+}
 
-	var err error
+func firstOpenPort(dh discoverHost, eachAttempt func()) chan *hostConfig {
+	const (
+		maxAttempts          = 500
+		perAttemptTimeout    = 1 * time.Second
+		delayBetweenAttempts = 500 * time.Millisecond
+	)
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		fmt.Print(".")
-		conn, _ := net.DialTimeout("tcp", net.JoinHostPort(config["bootstrapper"], "34001"), 1 * time.Second)
-		if conn != nil {
-			bootsrapperPortOpen = true
-			err = conn.Close()
-			if err != nil {
-				return fmt.Errorf("Error closing test bootstrapper connection: %v", err)
+	openPortHost := make(chan *hostConfig, 1)
+	stopSearch := make(chan struct{})
+
+	for _, host := range dh.Addresses {
+		go func(h string) {
+			for attempt := 0; attempt < maxAttempts; attempt++ {
+				select {
+				case <-stopSearch:
+					return
+				default:
+					eachAttempt()
+					hostAndPort := net.JoinHostPort(h, dh.Port)
+					conn, _ := net.DialTimeout("tcp", hostAndPort, perAttemptTimeout)
+					if conn != nil {
+						_ = conn.Close()
+						close(stopSearch)
+						openPortHost <- &hostConfig{Host: h, Port: dh.Port}
+						return
+					}
+					time.Sleep(delayBetweenAttempts)
+				}
 			}
-		}
-		conn, _ = net.DialTimeout("tcp", net.JoinHostPort(config["rpcServer"], "50051"), 1 * time.Second)
-		if conn != nil {
-			rpcServerPortOpen = true
-			err = conn.Close()
-			if err != nil {
-				return fmt.Errorf("Error closing test RPC server connection: %v", err)
-			}
-		}
-		if bootsrapperPortOpen && rpcServerPortOpen {
-			fmt.Println()
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
+			// if we get here we hit maxAttempts and should signal a timeout by closing the result chan
+			close(openPortHost)
+		}(host)
 	}
 
-	return nil
+	return openPortHost
+}
+
+func waitForOpenPorts(hosts map[string]discoverHost) (map[string]hostConfig, error) {
+	result := make(map[string]hostConfig)
+
+	hostSearches := make(map[string]chan *hostConfig)
+
+	progressUpdate := func() { fmt.Print(".") }
+
+	for hostType, dh := range hosts {
+		hostSearches[hostType] = firstOpenPort(dh, progressUpdate)
+	}
+
+	for {
+		for hostType, search := range hostSearches {
+			select {
+			case host, ok := <-search:
+				if ok {
+					result[hostType] = *host
+				} else {
+					return nil, fmt.Errorf("timeout waiting for %s port to open", hostType)
+				}
+			default:
+			}
+		}
+
+		if len(result) == len(hosts) {
+			break
+		}
+	}
+
+	return result, nil
+}
+
+func waitForBootstrapAndRPCServers(bootstrapper discoverHost, rpcServer discoverHost) (discoveredBootstrapper *hostConfig,
+	discoveredRpcServer *hostConfig, err error) {
+	fmt.Println("Waiting for bootstrapper and RPC server to come up")
+
+	waitResult, err := waitForOpenPorts(map[string]discoverHost{
+		"bootstrapper": bootstrapper,
+		"rpcServer":    rpcServer,
+	})
+
+	fmt.Println()
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bootstrapperHost := waitResult["bootstrapper"]
+	rpcServerHost := waitResult["rpcServer"]
+
+	return &bootstrapperHost, &rpcServerHost, nil
 }
 
 var runningTupelo = make(map[string]string)
 
 func runSingle(tester *containerConfig, tupelo *containerConfig) int {
-    var (
-    	bootstrapperIP string
-    	rpcServerIP string
-    	err error
+	var (
+		bootstrapperIP string
+		rpcServerIP    string
+		err            error
 	)
 
-    if len(runningTupelo) == 0 {
+	if len(runningTupelo) == 0 {
 		if tupelo.DockerCompose {
 			fmt.Println("Starting tupelo docker-compose stack")
 			err := runForegroundCmd(dockerComposeCmd, "up", "-d", "--build", "--force-recreate")
@@ -217,11 +280,10 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 
 			runningTupelo["network"] = "tupelo_default"
 
-			err = waitForBootstrapAndRPCServers(
-				map[string]string{
-					"bootstrapper": bootstrapperIP,
-					"rpcServer":    rpcServerIP,
-				})
+			_, _, err = waitForBootstrapAndRPCServers(
+				discoverHost{Addresses: []string{"127.0.0.1", bootstrapperIP}, Port: "34001"},
+				discoverHost{Addresses: []string{"127.0.0.1", rpcServerIP}, Port: "50051"},
+			)
 			if err != nil {
 				log.Error(err)
 				return 1
