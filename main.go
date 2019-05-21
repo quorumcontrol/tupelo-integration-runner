@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -240,6 +241,22 @@ func waitForBootstrapAndRPCServers(bootstrapper discoverHost, rpcServer discover
 	return &bootstrapperHost, &rpcServerHost, nil
 }
 
+func dockerHostIP() (string, error) {
+	dockerHost := os.Getenv("DOCKER_HOST")
+
+	if dockerHost != "" {
+		dockerHostURL, err := url.Parse(dockerHost)
+		if err != nil {
+			return "", fmt.Errorf("error parsing DOCKER_HOST URL: %v", err)
+		}
+
+		// NB: This assumes an IP address, not a hostname
+		return dockerHostURL.Hostname(), nil
+	}
+
+	return "127.0.0.1", nil
+}
+
 var runningTupelo = make(map[string]string)
 
 func runSingle(tester *containerConfig, tupelo *containerConfig) int {
@@ -280,9 +297,15 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 
 			runningTupelo["network"] = "tupelo_default"
 
+			dockerHost, err := dockerHostIP()
+			if err != nil {
+				log.Error(err)
+				return 1
+			}
+
 			_, _, err = waitForBootstrapAndRPCServers(
-				discoverHost{Addresses: []string{"127.0.0.1", bootstrapperIP}, Port: "34001"},
-				discoverHost{Addresses: []string{"127.0.0.1", rpcServerIP}, Port: "50051"},
+				discoverHost{Addresses: []string{dockerHost, bootstrapperIP}, Port: "34001"},
+				discoverHost{Addresses: []string{dockerHost, rpcServerIP}, Port: "50051"},
 			)
 			if err != nil {
 				log.Error(err)
