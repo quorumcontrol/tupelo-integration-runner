@@ -14,7 +14,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	yaml "gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v2"
 )
 
 var dockerCmd string
@@ -151,14 +151,15 @@ type hostConfig struct {
 	Port string
 }
 
-func firstOpenPort(dh discoverHost, eachAttempt func()) chan *hostConfig {
+func firstOpenPort(dh discoverHost, eachAttempt func()) (openPortHost chan *hostConfig, err chan error) {
 	const (
 		maxAttempts          = 500
 		perAttemptTimeout    = 1 * time.Second
 		delayBetweenAttempts = 500 * time.Millisecond
 	)
 
-	openPortHost := make(chan *hostConfig, 1)
+	openPortHost = make(chan *hostConfig, 1)
+	err = make(chan error, 1)
 	stopSearch := make(chan struct{})
 
 	for _, host := range dh.Addresses {
@@ -180,34 +181,33 @@ func firstOpenPort(dh discoverHost, eachAttempt func()) chan *hostConfig {
 					time.Sleep(delayBetweenAttempts)
 				}
 			}
-			// if we get here we hit maxAttempts and should signal a timeout by closing the result chan
-			close(openPortHost)
+			// if we get here we hit maxAttempts and should send a timeout error on the channel
+			err <- fmt.Errorf("maximum attempts (%d) with no hosts reachable", maxAttempts)
 		}(host)
 	}
 
-	return openPortHost
+	return openPortHost, err
 }
 
 func waitForOpenPorts(hosts map[string]discoverHost) (map[string]hostConfig, error) {
 	result := make(map[string]hostConfig)
 
 	hostSearches := make(map[string]chan *hostConfig)
+	searchErrors := make(map[string]chan error)
 
 	progressUpdate := func() { fmt.Print(".") }
 
 	for hostType, dh := range hosts {
-		hostSearches[hostType] = firstOpenPort(dh, progressUpdate)
+		hostSearches[hostType], searchErrors[hostType] = firstOpenPort(dh, progressUpdate)
 	}
 
 	for {
 		for hostType, search := range hostSearches {
 			select {
-			case host, ok := <-search:
-				if ok {
-					result[hostType] = *host
-				} else {
-					return nil, fmt.Errorf("timeout waiting for %s port to open", hostType)
-				}
+			case host := <-search:
+				result[hostType] = *host
+			case err := <-searchErrors[hostType]:
+				return nil, err
 			default:
 			}
 		}
