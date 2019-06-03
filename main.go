@@ -18,6 +18,8 @@ import (
 var dockerCmd string
 var dockerComposeCmd string
 
+const projectName = "tupelo"
+
 func runCmd(name string, arg ...string) (string, error) {
 	log.Tracef("Running command %v", strings.Join(append([]string{name}, arg...), " "))
 	cmd := exec.Command(name, arg...)
@@ -206,7 +208,7 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 	if len(runningTupelo) == 0 {
 		if tupelo.DockerCompose {
 			fmt.Println("Starting tupelo docker-compose stack")
-			err := runForegroundCmd(dockerComposeCmd, "up", "-d", "--build", "--force-recreate")
+			err := runForegroundCmd(dockerComposeCmd, "up", "-p", projectName, "-d", "--build", "--force-recreate")
 			if err != nil {
 				log.Errorf("error running 'docker-compose up': %v", err)
 				return 1
@@ -232,7 +234,7 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 				return 1
 			}
 
-			runningTupelo["network"] = "tupelo_default"
+			runningTupelo["network"] = fmt.Sprintf("%s_default", projectName)
 
 			err = waitForBootstrapAndRPCServers(runningTupelo)
 			if err != nil {
