@@ -208,7 +208,7 @@ func runSingle(tester *containerConfig, tupelo *containerConfig) int {
 	if len(runningTupelo) == 0 {
 		if tupelo.DockerCompose {
 			fmt.Println("Starting tupelo docker-compose stack")
-			err := runForegroundCmd(dockerComposeCmd, "up", "-p", projectName, "-d", "--build", "--force-recreate")
+			err := runForegroundCmd(dockerComposeCmd, "-p", projectName, "up", "-d", "--build", "--force-recreate")
 			if err != nil {
 				log.Errorf("error running 'docker-compose up': %v", err)
 				return 1
