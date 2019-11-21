@@ -1,24 +1,18 @@
-FROM golang:1.12.5 AS build
-
-WORKDIR /app
-
-COPY go.* ./
-
-RUN go mod download
-
-COPY . ./
-
-RUN go build
-
 FROM debian:stretch-slim
 LABEL maintainer="dev@quroumcontrol.com"
 
+RUN apt-get update && \
+    apt-get install -y jq && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 COPY --from=library/docker:latest /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker/compose:1.25.0-debian /usr/local/bin/docker-compose /usr/bin/docker-compose
 
-COPY --from=build /app/tupelo-integration-runner /usr/local/bin/tupelo-integration-runner
+# This creates a volume that can be mounted into test runner containers
+# and is use for the internal docker-compose staack to mount config files into
+VOLUME /tupelo-integration
+COPY ./docker/ /tupelo-integration
 
-RUN mkdir -p /src/tupelo
-WORKDIR /src/tupelo
+WORKDIR /tupelo-integration
 
-ENTRYPOINT ["/usr/local/bin/tupelo-integration-runner"]
-CMD ["run"]
+ENTRYPOINT [ "/tupelo-integration/run.sh" ]

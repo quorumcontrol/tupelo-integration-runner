@@ -1,0 +1,62 @@
+version: "3"
+
+services:
+  bootstrap:
+    image: quorumcontrol/tupelo:${TUPELO_VERSION}
+    command: ["bootstrap-node", "--config", "/tupelo-integration/config/bootstrap.toml", 
+      "-L", "${TUPELO_LOG_LEVEL:-error}"]
+    volumes:
+      - tupelo-integration:/tupelo-integration
+    networks:
+      default:
+        ipv4_address: 172.16.247.10
+    ports:
+      - "34001:34001"
+      
+  node0:
+    image: quorumcontrol/tupelo:${TUPELO_VERSION}
+    volumes:
+      - tupelo-integration:/tupelo-integration
+    command: ["test-node", "--config", "/tupelo-integration/config/node0.toml",
+      "-L", "${TUPELO_LOG_LEVEL:-error}"]
+
+  node1:
+    image: quorumcontrol/tupelo:${TUPELO_VERSION}
+    volumes:
+      - tupelo-integration:/tupelo-integration
+    command: ["test-node", "--config", "/tupelo-integration/config/node1.toml",
+      "-L", "${TUPELO_LOG_LEVEL:-error}"]
+  
+  node2:
+    image: quorumcontrol/tupelo:${TUPELO_VERSION}
+    volumes:
+      - tupelo-integration:/tupelo-integration
+    command: ["test-node", "--config", "/tupelo-integration/config/node2.toml",
+      "-L", "${TUPELO_LOG_LEVEL:-error}"]
+
+  community:
+    image: quorumcontrol/community:${COMMUNITY_VERSION}
+    volumes:
+      - tupelo-integration:/tupelo-integration
+    command: ["-c", "/tupelo-integration/config/community.toml"]
+    networks:
+      default:
+        ipv4_address: 172.16.247.11
+    ports:
+      - "50000:50000"
+ 
+  community2:
+    image: quorumcontrol/community:${COMMUNITY_VERSION}
+    volumes:
+      - tupelo-integration:/tupelo-integration
+    command: ["-c", "/tupelo-integration/config/community2.toml"]
+
+volumes:
+  tupelo-integration:
+    external: 
+      name: ${INTEGRATION_VOLUME_NAME}
+
+networks:
+  default:
+    external:
+      name: ${NETWORK_NAME}

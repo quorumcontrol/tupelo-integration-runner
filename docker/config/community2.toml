@@ -1,0 +1,13 @@
+Name = "tupelolocal"
+Shards = 32
+
+CacheMessages = false
+CacheBlocks = true
+RebroadcastCommit = true
+TrackPeers = false
+
+NotaryGroupConfig = "./notarygroup.toml"
+WebsocketPort = 50000
+
+[Storage]
+Kind = "memory"
